@@ -180,6 +180,12 @@ sudo pkill bluetoothd
 
 单纯“配对一次”本身通常不会明显增加续航负担。对续航影响更大的，一般是后续频繁的主动蓝牙连接或轮询，而不是这一步配对操作。
 
+## Agent 模式
+
+默认关闭；关闭时行为与原来完全相同。开启后，当设备离开而屏幕未锁定时，BLEUnlock 不会锁屏，而是在所有显示器上盖上遮罩（默认为“隐私遮罩”，截图中不可见；也可选“全黑”），让 AI agent 继续操作。期间任何真实键盘、鼠标或触控板输入都会立即锁屏（`agent-intruded`）；agent 闲置超过设定分钟数（默认 10）也会锁屏（`agent-idle`）；设备回来时移除遮罩（`agent-release`）。若事件监听失效、Mac 睡眠或 BLEUnlock 退出，会自动锁屏。需要“输入监控”与“辅助功能”权限。
+
+命令行控制：`/Applications/BLEUnlock.app/Contents/MacOS/BLEUnlock agent status|on|off|shield|release|ping|idle-timeout <分钟>|style overlay|blackout`。详细说明见英文 README 的 *Agent Mode* 一节。
+
 ## 在锁定/解锁时执行脚本
 
 当锁定或解锁发生时，BLEUnlock 会执行以下位置的脚本：

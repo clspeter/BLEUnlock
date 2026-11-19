@@ -146,7 +146,6 @@ func notifyUpdateAvailable() {
     }
 }
 
-@NSApplicationMain
 class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenuItemValidation, NSUserNotificationCenterDelegate, UNUserNotificationCenterDelegate, BLEDelegate {
     let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     let ble = BLE()
@@ -175,6 +174,8 @@ struct DeviceMenuItemView {
     var wakeOnProximityMenuItem: NSMenuItem?
     var wakeWithoutUnlockingMenuItem: NSMenuItem?
     var triggerWatchUnlockMenuItem: NSMenuItem?
+    let agentMenu = NSMenu()
+    lazy var agentMode = AgentModeController(prefs: prefs)
     /// Serial queue for ServiceManagement XPC calls to avoid concurrent smd requests.
     let smdQueue = DispatchQueue(label: "com.github.Skyearn.BLEUnlock.smd")
     let prefs = UserDefaults.standard
@@ -1579,6 +1580,7 @@ struct DeviceMenuItemView {
             pendingLockDeviceRSSI = nil
             cancelAutomaticLockChecks()
             guard ble.hasStableUnlockEvidence() else { return }
+            agentMode.presenceReturned()
             if ble.unlockRSSI != ble.UNLOCK_DISABLED {
                 if let identifier = userNotificationID {
                     removeDeliveredNotification(identifier: identifier)
@@ -1632,14 +1634,19 @@ struct DeviceMenuItemView {
             cancelAutomaticLockChecks()
             return
         }
-        let idle = CGEventSource.secondsSinceLastEventType(.combinedSessionState,
-                                                         eventType: CGEventType(rawValue: UInt32.max)!)
+        let idle = agentMode.humanIdleSeconds()
+            ?? CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: CGEventType(rawValue: UInt32.max)!)
         let protectWhileActive = prefs.bool(forKey: "preventLockWhileActive")
         if let reason = ble.automaticLockReason(idleSeconds: idle, protectWhileActive: protectWhileActive) {
             let device = pendingLockDevice
             let deviceRSSI = pendingLockDeviceRSSI
             pendingLockDevice = nil
             pendingLockDeviceRSSI = nil
+            if agentMode.handleAwayConfirmed() {
+                // Agent Mode shields the unlocked session instead of locking it.
+                cancelAutomaticLockChecks()
+                return
+            }
             cancelAutomaticLockChecks()
             pauseNowPlaying()
             lockOrSaveScreen()
@@ -1938,6 +1945,7 @@ struct DeviceMenuItemView {
         lastSystemSleepStartedAt = Date().timeIntervalSince1970
         cancelAllWakeTimers()
         cancelAutomaticLockChecks()
+        agentMode.systemWillSleep()
         ble.suspendMonitoringForSystemSleep()
         // Set activation policy to regular, so the CBCentralManager can scan for peripherals
         // when the Bluetooth will become on again.
@@ -1950,6 +1958,7 @@ struct DeviceMenuItemView {
         pendingUnlockDeviceRSSI = nil
         cancelUnlockTimers()
         resetWatchUnlockAttempts()
+        agentMode.screenUnlocked()
         // The system can unlock before the delayed wake-recovery timer fires.
         // Finish that recovery now instead of cancelling it; otherwise BLE
         // monitoring stays suspended until the app is restarted.
@@ -1988,6 +1997,10 @@ struct DeviceMenuItemView {
         print("screensaver stop")
         inScreensaver = false
         lastScreensaverStartedAt = 0
+    }
+
+    @objc func onScreenLocked() {
+        agentMode.screenLocked()
     }
 
     @objc func toggleDeviceCheckbox(_ sender: NSButton) {
@@ -2619,6 +2632,8 @@ struct DeviceMenuItemView {
             item.state = .on
         }
         
+        constructAgentMenu()
+
         mainMenu.addItem(withTitle: t("set_password"), action: #selector(askPassword), keyEquivalent: "")
 
         item = mainMenu.addItem(withTitle: t("passive_mode"), action: #selector(togglePassiveMode), keyEquivalent: "")
@@ -2857,6 +2872,9 @@ struct DeviceMenuItemView {
         dnc.addObserver(self, selector: #selector(onUnlock), name: NSNotification.Name(rawValue: "com.apple.screenIsUnlocked"), object: nil)
         dnc.addObserver(self, selector: #selector(onScreensaverStart), name: NSNotification.Name(rawValue: "com.apple.screensaver.didstart"), object: nil)
         dnc.addObserver(self, selector: #selector(onScreensaverStop), name: NSNotification.Name(rawValue: "com.apple.screensaver.didstop"), object: nil)
+        dnc.addObserver(self, selector: #selector(onScreenLocked), name: NSNotification.Name(rawValue: "com.apple.screenIsLocked"), object: nil)
+        agentMode.host = self
+        agentMode.start()
 
         if ble.unlockRSSI != ble.UNLOCK_DISABLED && !prefs.bool(forKey: "wakeWithoutUnlocking") && fetchPassword() == nil {
             askPassword()
@@ -2887,7 +2905,116 @@ struct DeviceMenuItemView {
     
     func applicationWillTerminate(_ aNotification: Notification) {
         cancelAutomaticLockChecks()
+        agentMode.shutdown()
         permissionRecoveryTimer?.invalidate()
         permissionRecoveryTimer = nil
+    }
+}
+
+// MARK: - Agent Mode
+
+extension AppDelegate: AgentModeHost {
+    private static let agentStyleTags: [AgentShieldStyle: Int] = [.overlay: 0, .blackout: 1]
+
+    func constructAgentMenu() {
+        let item = mainMenu.addItem(withTitle: NSLocalizedString("agent_mode", value: "Agent Mode", comment: "Agent Mode submenu"),
+                                    action: nil, keyEquivalent: "")
+        item.submenu = agentMenu
+        let toggle = agentMenu.addItem(withTitle: NSLocalizedString("agent_mode_enable", value: "Enable Agent Mode", comment: "Agent Mode toggle"),
+                                       action: #selector(toggleAgentMode), keyEquivalent: "")
+        toggle.toolTip = NSLocalizedString("agent_mode_help",
+                                           value: "When your device goes away, cover the screens instead of locking so an AI agent can keep working. Any local keyboard, mouse or trackpad input locks the Mac immediately.",
+                                           comment: "Agent Mode tooltip")
+        agentMenu.addItem(NSMenuItem.separator())
+        agentMenu.addItem(withTitle: NSLocalizedString("agent_shield_overlay", value: "Privacy Overlay", comment: "Agent Mode shield style"),
+                          action: #selector(setAgentShieldStyle), keyEquivalent: "").tag = Self.agentStyleTags[.overlay]!
+        agentMenu.addItem(withTitle: NSLocalizedString("agent_shield_blackout", value: "Blackout (Screens Dark)", comment: "Agent Mode shield style"),
+                          action: #selector(setAgentShieldStyle), keyEquivalent: "").tag = Self.agentStyleTags[.blackout]!
+        agentMenu.addItem(NSMenuItem.separator())
+        let header = agentMenu.addItem(withTitle: NSLocalizedString("agent_idle_exit", value: "Lock When Agent Is Idle", comment: "Agent Mode idle timeout header"),
+                                       action: nil, keyEquivalent: "")
+        header.isEnabled = false
+        for minutes in [5, 10, 30] {
+            agentMenu.addItem(withTitle: "\(minutes) " + t("minutes"), action: #selector(setAgentIdleTimeout), keyEquivalent: "").tag = minutes
+        }
+        agentMenu.addItem(withTitle: NSLocalizedString("agent_idle_never", value: "Never", comment: "Agent Mode idle timeout disabled"),
+                          action: #selector(setAgentIdleTimeout), keyEquivalent: "").tag = 0
+        refreshAgentMenu()
+    }
+
+    func refreshAgentMenu() {
+        let styleTag = Self.agentStyleTags[agentMode.style]
+        let timeout = agentMode.idleTimeoutMinutes
+        for item in agentMenu.items {
+            switch item.action {
+            case #selector(toggleAgentMode): item.state = prefs.bool(forKey: "agentMode") ? .on : .off
+            case #selector(setAgentShieldStyle): item.state = item.tag == styleTag ? .on : .off
+            case #selector(setAgentIdleTimeout): item.state = item.tag == timeout ? .on : .off
+            default: break
+            }
+        }
+    }
+
+    @objc func toggleAgentMode(_ menuItem: NSMenuItem) {
+        agentMode.setEnabled(!agentMode.enabled)
+    }
+
+    @objc func setAgentShieldStyle(_ menuItem: NSMenuItem) {
+        guard let style = Self.agentStyleTags.first(where: { $0.value == menuItem.tag })?.key else { return }
+        agentMode.setStyle(style)
+    }
+
+    @objc func setAgentIdleTimeout(_ menuItem: NSMenuItem) {
+        agentMode.setIdleTimeoutMinutes(menuItem.tag)
+    }
+
+    func agentLockScreen() {
+        if SACLockScreenImmediate() != 0 {
+            print("Failed to lock screen")
+        }
+    }
+
+    func agentRunScript(_ event: String) {
+        runScript(event)
+    }
+
+    func agentIsScreenLocked() -> Bool {
+        isScreenLocked()
+    }
+
+    func agentPresenceHere() -> Bool {
+        ble.presence && ble.hasStableUnlockEvidence()
+    }
+
+    func agentCanUnlockWithPassword() -> Bool {
+        checkAccessibility(showPrompt: false) && fetchPassword() != nil
+    }
+
+    func agentUnlockWithPassword() {
+        guard checkAccessibility(showPrompt: false), let password = fetchPassword() else { return }
+        wakeDisplay()
+        agentTypePassword(password, attempt: 0)
+    }
+
+    /// Same keystroke path as the proximity unlock, with one retry for a
+    /// login window that was not ready yet. The machine times out the attempt.
+    private func agentTypePassword(_ password: String, attempt: Int) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+            guard let self = self, self.agentMode.isUnlocking, self.isScreenLocked() else { return }
+            if self.inScreensaver {
+                self.sendEscapeKey()
+            }
+            self.unlockedAt = Date().timeIntervalSince1970
+            self.fakeKeyStrokes(password)
+            guard attempt == 0 else { return }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
+                guard let self = self, self.agentMode.isUnlocking, self.isScreenLocked() else { return }
+                self.agentTypePassword(password, attempt: attempt + 1)
+            }
+        }
+    }
+
+    func agentSettingsChanged() {
+        refreshAgentMenu()
     }
 }

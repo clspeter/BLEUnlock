@@ -1,5 +1,10 @@
 # Release Notes
 
+## Unreleased
+
+- **Feat:** Added an optional Agent Mode (off by default). When the monitored device goes away while the screen is unlocked, BLEUnlock covers every display with a privacy shield (overlay hidden from screen capture, or gamma blackout) instead of locking, so an AI agent can keep operating the Mac. Any local hardware keyboard/mouse/trackpad input locks immediately, agent inactivity locks after a configurable timeout, and a watchdog process locks if BLEUnlock exits or hangs while shielded. Controlled from the menu or `BLEUnlock agent <command>` over a per-user Unix socket; new event-script arguments `agent-shield`, `agent-release`, `agent-intruded` and `agent-idle`.
+- **Build:** Added Agent Mode state-machine regression checks to CI.
+
 
 ## 1.14.5
 

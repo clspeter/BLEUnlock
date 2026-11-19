@@ -114,6 +114,7 @@ Set Password... | If you changed your login password, use this.
 Passive Mode | By default it actively tries to connect to the BLE device and read the RSSI. Most of the time, the default is recommended and works stably. However, if you are using other Bluetooth things like keyboard, mouse, track pad or most notably Bluetooth Personal Hotspot, the default mode may interfere with each other. 2.4GHz WiFi may interfere as well. If you are experiencing instability of Bluetooth, turn on Passive Mode.
 Launch at Login | Launches BLEUnlock when you login.
 Set Minimum RSSI | Devices with RSSI below this value will not be displayed in the device scan list.
+Agent Mode | Off by default. See [Agent Mode](#agent-mode-let-an-ai-agent-keep-working-while-you-are-away).
 
 ## Troubleshooting
 
@@ -182,6 +183,46 @@ If a device uses rotating private addresses, pair it with your Mac once in *Syst
 
 Pairing itself usually has little effect on battery life. The bigger battery impact comes from frequent active Bluetooth connections or polling, not from the one-time pairing step.
 
+## Agent Mode: let an AI agent keep working while you are away
+
+Agent Mode is for letting an AI agent (for example a "computer use" tool) keep operating this Mac's GUI after you walk away, without showing the screen to people nearby. It is **off by default**; with it off, BLEUnlock behaves exactly as before.
+
+When it is on and your device goes away while the screen is unlocked, BLEUnlock does not lock. Instead it:
+
+- covers every display with a *shield* and keeps the displays awake;
+- watches local input with a listen-only event tap; **any keyboard, mouse or trackpad input from real hardware locks the Mac immediately** (`agent-intruded`);
+- ends the session and locks after *Lock When Agent Is Idle* minutes without agent activity (default 10; `agent-idle`);
+- removes the shield without locking when your device comes back (`agent-release`).
+
+Shield styles (menu *Agent Mode*, or `style`):
+
+- **Privacy Overlay** (default): a dark window with one short line of text on every display. It is excluded from screenshots and screen recording, so the agent still sees the desktop, and it never takes focus or intercepts clicks. The text can be changed with `defaults write com.github.Skyearn.BLEUnlock agentShieldText "…"`.
+- **Blackout**: display gamma is set to zero, so the screens look off. Screenshots are unaffected because gamma is applied after capture.
+
+Input from real hardware (including Karabiner-Elements' virtual keyboard) is treated as a person; events synthesized by other processes are treated as the agent and reset the idle timer. Input that a tool delivers directly to an app (for example Orca's background input) is invisible to the guard, so such agents should call `ping` while working. Agent Mode needs *Input Monitoring* permission for the event tap in addition to Accessibility.
+
+It fails closed: if the event tap cannot be created or stays disabled, if the Mac goes to sleep, or if BLEUnlock exits or stops responding while shielded, the screen is locked. The last case is handled by a small watchdog process (BLEUnlock started with `--agent-watchdog`) that locks the screen within about a second when BLEUnlock disappears and within two seconds when its main thread stops sending heartbeats. `killall BLEUnlock` stops the watchdog too.
+
+Limitations: while an app holds Secure Event Input (password fields, some terminals), macOS hides keystrokes from event taps, so only mouse and trackpad input is detected; `status` reports this as `secureInput`.
+
+### Controlling Agent Mode from a shell
+
+```
+/Applications/BLEUnlock.app/Contents/MacOS/BLEUnlock agent <command>
+```
+
+|Command|Effect|
+|-------|------|
+|`status`|Print the state as JSON: `agentMode`, `phase` (`idle`/`unlocking`/`shielded`), `shielded`, `presence`, `locked`, `guardHealthy`, `secureInput`, `watchdog`, `style`, `idleTimeoutMinutes`, `idleRemainingSeconds`.|
+|`on` / `off`|Enable or disable Agent Mode. Turning it off during a session locks unless your device is nearby.|
+|`shield`|Start a session now. If the screen is locked, the shield goes up first and BLEUnlock then unlocks with the stored password.|
+|`release`|End the session; locks unless your device is nearby.|
+|`ping`|Report agent activity (resets the idle timer). Every command counts as activity.|
+|`idle-timeout <minutes>`|Minutes without agent activity before the session ends with a lock; `0` = never.|
+|`style overlay` / `style blackout`|Choose the shield style.|
+
+Commands go through a Unix socket in your per-user temporary directory that only your user can connect to. The interface never accepts or prints the password. The exit status is 0 on success, 1 on a refused command and 2 when BLEUnlock is not running.
+
 ## Run script on lock/unlock
 
 On locking and unlocking, BLEUnlock runs a script located here:
@@ -198,6 +239,10 @@ An argument is passed depending on the type of event:
 |Locked by BLEUnlock because of no signal|`lost`|
 |Unlocked by BLEUnlock|`unlocked`|
 |Unlocked manually|`intruded`|
+|Agent Mode shielded the screen instead of locking|`agent-shield`|
+|Agent Mode session ended without a local intrusion (device returned, `release`/`off`, lock, sleep or guard failure)|`agent-release`|
+|Agent Mode locked because of local keyboard/mouse/trackpad input|`agent-intruded`|
+|Agent Mode locked because the agent was idle|`agent-idle`|
 
 Script arguments are:
 

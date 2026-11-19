@@ -69,3 +69,11 @@
 "wake_without_unlocking" = "Wake without Unlocking";
 "trigger_watch_unlock" = "Trigger Apple Watch Unlock";
 "pair_for_mac_hint" = "Pair to stabilize random address tracking →";
+"agent_mode" = "Agent Mode";
+"agent_mode_enable" = "Enable Agent Mode";
+"agent_mode_help" = "When your device goes away, cover the screens instead of locking so an AI agent can keep working. Any local keyboard, mouse or trackpad input locks the Mac immediately.";
+"agent_shield_overlay" = "Privacy Overlay";
+"agent_shield_blackout" = "Blackout (Screens Dark)";
+"agent_shield_text" = "In use remotely — please don't touch";
+"agent_idle_exit" = "Lock When Agent Is Idle";
+"agent_idle_never" = "Never";

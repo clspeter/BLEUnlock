@@ -69,3 +69,11 @@
 "wake_without_unlocking" = "唤醒时不需解锁";
 "trigger_watch_unlock" = "触发 Apple Watch 解锁";
 "pair_for_mac_hint" = "配对以稳定追踪随机地址 →";
+"agent_mode" = "Agent 模式";
+"agent_mode_enable" = "启用 Agent 模式";
+"agent_mode_help" = "设备离开时改为遮蔽屏幕而不锁定，让 AI agent 继续工作。本机键盘、鼠标或触控板一有输入就立即锁定 Mac。";
+"agent_shield_overlay" = "隐私遮罩";
+"agent_shield_blackout" = "全黑（屏幕变暗）";
+"agent_shield_text" = "远程作业中，请勿操作";
+"agent_idle_exit" = "Agent 闲置时锁定";
+"agent_idle_never" = "永不";

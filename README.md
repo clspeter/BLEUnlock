@@ -215,7 +215,7 @@ Limitations: while an app holds Secure Event Input (password fields, some termin
 |-------|------|
 |`status`|Print the state as JSON: `agentMode`, `phase` (`idle`/`unlocking`/`shielded`), `shielded`, `presence`, `locked`, `guardHealthy`, `secureInput`, `watchdog`, `style`, `idleTimeoutMinutes`, `idleRemainingSeconds`.|
 |`on` / `off`|Enable or disable Agent Mode. Turning it off during a session locks unless your device is nearby.|
-|`shield`|Start a session now. If the screen is locked, the shield goes up first and BLEUnlock then unlocks with the stored password.|
+|`shield`|Start a session now. If the screen is locked, the shield goes up first and BLEUnlock then unlocks with the stored password. The command returns once the unlock has started; poll `status` until `phase` is `shielded` and `locked` is `false`. If the unlock does not complete within 15 seconds, the screen stays locked and `phase` returns to `idle`.|
 |`release`|End the session; locks unless your device is nearby.|
 |`ping`|Report agent activity (resets the idle timer). Every command counts as activity.|
 |`idle-timeout <minutes>`|Minutes without agent activity before the session ends with a lock; `0` = never.|

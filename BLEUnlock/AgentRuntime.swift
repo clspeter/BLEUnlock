@@ -94,7 +94,7 @@ final class AgentShield {
         windows.forEach { $0.orderOut(nil) }
         windows.removeAll()
         if style == .blackout {
-            CGDisplayRestoreColorSyncSettings()
+            AgentGammaBackup.restore()
         }
     }
 
@@ -146,6 +146,7 @@ final class AgentShield {
         guard CGGetOnlineDisplayList(count, &displays, &count) == .success else { return }
         let zeros = [CGGammaValue](repeating: 0, count: 256)
         for display in displays.prefix(Int(count)) where !isBlack(display) {
+            AgentGammaBackup.save(display)
             CGSetDisplayTransferByTable(display, 256, zeros, zeros, zeros)
         }
     }
@@ -176,6 +177,52 @@ final class AgentShield {
         assertions.forEach { IOPMAssertionRelease($0) }
         assertions.removeAll()
     }
+}
+
+/// Original gamma tables of blacked-out displays. macOS 26 keeps a gamma
+/// table after the setting process exits and CGDisplayRestoreColorSyncSettings
+/// does not undo it, so the tables are restored explicitly. They are also
+/// written to disk so the watchdog, or the next launch, can restore them if
+/// BLEUnlock dies while the displays are black.
+enum AgentGammaBackup {
+    private typealias Table = [String: [[Float]]]
+    private static var tables: Table = [:]
+    private static var url: URL { URL(fileURLWithPath: agentTemporaryPath("agent-gamma.plist")) }
+
+    static func save(_ display: CGDirectDisplayID) {
+        let key = String(display)
+        guard tables[key] == nil else { return }
+        let capacity = CGDisplayGammaTableCapacity(display)
+        guard capacity > 0 else { return }
+        var red = [CGGammaValue](repeating: 0, count: Int(capacity))
+        var green = red, blue = red
+        var samples: UInt32 = 0
+        guard CGGetDisplayTransferByTable(display, capacity, &red, &green, &blue, &samples) == .success,
+              samples > 0 else { return }
+        let n = Int(samples)
+        tables[key] = [Array(red.prefix(n)), Array(green.prefix(n)), Array(blue.prefix(n))]
+        if let data = try? PropertyListSerialization.data(fromPropertyList: tables, format: .binary, options: 0) {
+            try? data.write(to: url, options: .atomic)
+        }
+    }
+
+    /// Puts back the saved tables, from memory or from a leftover file.
+    static func restore() {
+        if tables.isEmpty, let data = try? Data(contentsOf: url),
+           let saved = try? PropertyListSerialization.propertyList(from: data, format: nil) as? Table {
+            tables = saved
+        }
+        for (key, channels) in tables {
+            guard let display = CGDirectDisplayID(key), channels.count == 3 else { continue }
+            let n = UInt32(min(channels[0].count, channels[1].count, channels[2].count))
+            CGSetDisplayTransferByTable(display, n, channels[0], channels[1], channels[2])
+        }
+        CGDisplayRestoreColorSyncSettings()
+        tables.removeAll()
+        try? FileManager.default.removeItem(at: url)
+    }
+
+    static var hasLeftover: Bool { FileManager.default.fileExists(atPath: url.path) }
 }
 
 // MARK: - Input guard
@@ -373,6 +420,9 @@ func runAgentWatchdog() -> Never {
     func lock(_ reason: String) {
         print("Agent watchdog: \(reason); locking screen")
         _ = SACLockScreenImmediate()
+        if AgentGammaBackup.hasLeftover {
+            AgentGammaBackup.restore()
+        }
     }
     while true {
         var pfd = pollfd(fd: STDIN_FILENO, events: Int16(POLLIN), revents: 0)
@@ -408,10 +458,15 @@ func runAgentWatchdog() -> Never {
 /// Per-user socket in the Darwin user temp directory (mode 0700, owned by the
 /// user); connections from other UIDs are rejected as well.
 func agentControlSocketPath() -> String {
+    agentTemporaryPath("agent.sock")
+}
+
+/// A per-user, per-bundle file in the Darwin user temporary directory.
+func agentTemporaryPath(_ suffix: String) -> String {
     var buffer = [CChar](repeating: 0, count: Int(PATH_MAX))
     let directory = confstr(_CS_DARWIN_USER_TEMP_DIR, &buffer, buffer.count) > 0
         ? String(cString: buffer) : NSTemporaryDirectory()
-    let name = (Bundle.main.bundleIdentifier ?? "BLEUnlock") + ".agent.sock"
+    let name = (Bundle.main.bundleIdentifier ?? "BLEUnlock") + "." + suffix
     return (directory as NSString).appendingPathComponent(name)
 }
 
@@ -589,6 +644,9 @@ final class AgentModeController {
     private var now: TimeInterval { Date().timeIntervalSince1970 }
 
     func start() {
+        if AgentGammaBackup.hasLeftover {
+            AgentGammaBackup.restore()
+        }
         machine.idleTimeout = TimeInterval(idleTimeoutMinutes * 60)
         inputGuard.onHumanInput = { [weak self] in
             guard let self = self, self.machine.isActive else { return }

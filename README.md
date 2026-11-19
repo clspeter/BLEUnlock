@@ -203,7 +203,7 @@ Input from real hardware (including Karabiner-Elements' virtual keyboard) is tre
 
 It fails closed: if the event tap cannot be created or stays disabled, if the Mac goes to sleep, or if BLEUnlock exits or stops responding while shielded, the screen is locked. The last case is handled by a small watchdog process (BLEUnlock started with `--agent-watchdog`) that locks the screen within about a second when BLEUnlock disappears and within two seconds when its main thread stops sending heartbeats. `killall BLEUnlock` stops the watchdog too.
 
-Limitations: while an app holds Secure Event Input (password fields, some terminals), macOS hides keystrokes from event taps, so only mouse and trackpad input is detected; `status` reports this as `secureInput`.
+Limitations: while an app holds Secure Event Input (password fields, some terminals), macOS hides keystrokes from event taps, so only mouse and trackpad input is detected; `status` reports this as `secureInput`. Input from remote-desktop tools (Screen Sharing, RustDesk and the like) is synthesized by another process, so it counts as the agent and does not lock the screen.
 
 ### Controlling Agent Mode from a shell
 

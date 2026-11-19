@@ -216,6 +216,12 @@ final class AgentInputGuard {
     @discardableResult
     func start() -> Bool {
         guard tap == nil else { return true }
+        // Without Input Monitoring a listen-only tap may still be created yet
+        // miss keyboard events; that must not count as a working guard.
+        if #available(macOS 10.15, *), !CGPreflightListenEventAccess() {
+            print("Agent Mode: Input Monitoring permission missing")
+            return false
+        }
         let callback: CGEventTapCallBack = { _, type, event, info in
             if let info = info {
                 Unmanaged<AgentInputGuard>.fromOpaque(info).takeUnretainedValue().handle(type: type, event: event)
@@ -653,6 +659,12 @@ final class AgentModeController {
     /// Called where the automatic lock would fire. Returns true when Agent
     /// Mode handled the departure, so the caller must skip its own lock.
     func handleAwayConfirmed() -> Bool {
+        // A shield without a working input guard would only fail closed a
+        // moment later; lock the ordinary way so scripts see `away`/`lost`.
+        if machine.enabled && machine.phase == .idle {
+            if !inputGuard.isRunning { guardHealthy = inputGuard.start() }
+            if !inputGuard.isRunning || !guardHealthy { return false }
+        }
         let actions = machine.awayConfirmed(now: now)
         if actions == [.legacyLock] { return false }
         perform(actions)

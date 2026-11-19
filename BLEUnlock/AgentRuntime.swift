@@ -524,12 +524,19 @@ func runAgentCommandLineIfRequested(_ arguments: [String]) -> Int32? {
     }
     _ = (command + "\n").utf8CString.withUnsafeBufferPointer { write(fd, $0.baseAddress, $0.count - 1) }
     shutdown(fd, SHUT_WR)
+    // The app answers on its main thread, which a modal dialog can block; do not hang the caller forever.
+    var timeout = timeval(tv_sec: 10, tv_usec: 0)
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
     var reply = Data()
     var buffer = [UInt8](repeating: 0, count: 4096)
     while true {
         let count = read(fd, &buffer, buffer.count)
         if count <= 0 { break }
         reply.append(contentsOf: buffer.prefix(count))
+    }
+    guard !reply.isEmpty else {
+        FileHandle.standardError.write(Data("BLEUnlock did not respond within 10 seconds (is a dialog open?)\n".utf8))
+        return 1
     }
     FileHandle.standardOutput.write(reply)
     let object = try? JSONSerialization.jsonObject(with: reply) as? [String: Any]

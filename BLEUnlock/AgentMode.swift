@@ -27,10 +27,13 @@ enum AgentCommandError: String, Error {
 /// Pure Agent Mode policy. The app feeds it presence, input and lock-state
 /// events and executes the returned actions; nothing here touches the system.
 ///
-/// A session starts when the phone is confirmed away (or on an explicit
-/// `shield` command) and ends when the phone returns, a human touches the Mac,
-/// the agent goes idle, the guard fails, or the user/agent releases it. Any end
-/// while the user is not confirmed nearby locks the screen first.
+/// Agent activity means computer use: synthetic input, `ping` and `shield`.
+/// It is recorded whenever Agent Mode is enabled. A session starts when the
+/// phone is confirmed away within `idleTimeout` of the last activity (otherwise
+/// the Mac locks as usual) or on an explicit `shield` command, and ends when the
+/// phone returns, a human touches the Mac, the agent goes idle, the guard fails,
+/// or the user/agent releases it. Any end while the user is not confirmed nearby
+/// locks the screen first.
 struct AgentModeMachine {
     enum Phase: String {
         case idle
@@ -58,10 +61,11 @@ struct AgentModeMachine {
 
     var enabled = false
     /// Seconds without agent activity before a shielded session ends; 0 = never.
-    var idleTimeout: TimeInterval = 600
+    var idleTimeout: TimeInterval = 180
 
     private(set) var phase: Phase = .idle
-    private(set) var lastAgentActivity: TimeInterval = 0
+    /// Last computer use by an agent; -infinity until the first one.
+    private(set) var lastAgentActivity: TimeInterval = -.infinity
     private(set) var unlockStartedAt: TimeInterval = 0
     private var relockUntil: TimeInterval = 0
 
@@ -69,14 +73,17 @@ struct AgentModeMachine {
 
     // MARK: Presence
 
-    /// The automatic lock rules fired while the screen is unlocked.
+    /// The automatic lock rules fired while the screen is unlocked. Shields
+    /// only if an agent used the computer within `idleTimeout`; otherwise the
+    /// Mac locks the ordinary way. The shield then ends `idleTimeout` after
+    /// that last activity unless the agent keeps going.
     mutating func awayConfirmed(now: TimeInterval) -> [AgentAction] {
         guard enabled else { return [.legacyLock] }
         // Already covering the screen: repeated or flapping "away" must not
         // interrupt the agent with a lock.
         guard phase == .idle else { return [] }
+        if idleTimeout > 0 && now - lastAgentActivity >= idleTimeout { return [.legacyLock] }
         phase = .shielded
-        lastAgentActivity = now
         return [.showShield, .script("agent-shield")]
     }
 
@@ -93,8 +100,9 @@ struct AgentModeMachine {
         return end(.intruded, lock: true, now: now)
     }
 
-    /// Synthetic input from another process, or any control command.
+    /// Computer use by an agent: synthetic input or a `ping`/`shield` command.
     mutating func agentActivity(now: TimeInterval) {
+        guard enabled else { return }
         lastAgentActivity = max(lastAgentActivity, now)
     }
 

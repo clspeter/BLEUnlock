@@ -182,7 +182,7 @@ sudo pkill bluetoothd
 
 ## Agent 模式
 
-默认关闭；关闭时行为与原来完全相同。开启后，当设备离开而屏幕未锁定时，BLEUnlock 不会锁屏，而是在所有显示器上盖上遮罩（默认为“隐私遮罩”，截图中不可见；也可选“全黑”），让 AI agent 继续操作。期间任何真实键盘、鼠标或触控板输入都会立即锁屏（`agent-intruded`）；agent 闲置超过设定分钟数（默认 10）也会锁屏（`agent-idle`）；设备回来时移除遮罩（`agent-release`）。若事件监听失效、Mac 睡眠或 BLEUnlock 退出，会自动锁屏。需要“输入监控”与“辅助功能”权限。
+默认关闭；关闭时行为与原来完全相同。开启后，当设备离开而屏幕未锁定时，BLEUnlock 会先看最近“agent 闲置锁屏”分钟数内是否有 agent 操作过电脑（computer use）：没有就照常锁屏（`away`）；有就不锁屏，而是在所有显示器上盖上遮罩（默认为“隐私遮罩”，截图中不可见；也可选“全黑”），让 AI agent 继续操作。期间任何真实键盘、鼠标或触控板输入都会立即锁屏（`agent-intruded`）；距上次 agent 活动超过设定分钟数（默认 3）也会锁屏（`agent-idle`）；设备回来时移除遮罩（`agent-release`）。agent 活动只计算 computer use：其他进程合成的输入、`ping` 与 `shield`，只要 Agent 模式开启就会记录；`status` 等其他命令不算。只跑命令行或改文件的 agent 在锁屏状态下也能继续工作。设为“永不”时每次离开都会盖上遮罩。若事件监听失效、Mac 睡眠或 BLEUnlock 退出，会自动锁屏。需要“输入监控”与“辅助功能”权限。
 
 命令行控制：`/Applications/BLEUnlock.app/Contents/MacOS/BLEUnlock agent status|on|off|shield|release|ping|idle-timeout <分钟>|style overlay|blackout`。详细说明见英文 README 的 *Agent Mode* 一节。
 

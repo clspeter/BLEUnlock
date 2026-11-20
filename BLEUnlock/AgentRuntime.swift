@@ -9,7 +9,7 @@ private let agentModeKey = "agentMode"
 private let agentShieldStyleKey = "agentShieldStyle"
 private let agentShieldTextKey = "agentShieldText"
 private let agentIdleTimeoutKey = "agentIdleTimeout"
-private let defaultAgentIdleTimeoutMinutes = 10
+private let defaultAgentIdleTimeoutMinutes = 3
 private let agentWatchdogArgument = "--agent-watchdog"
 private let agentControlArgument = "agent"
 
@@ -565,7 +565,7 @@ func runAgentCommandLineIfRequested(_ arguments: [String]) -> Int32? {
           on | off               enable or disable Agent Mode
           shield                 cover the screens now; unlocks first if the screen is locked
           release                end the session (locks unless the phone is nearby)
-          ping                   report agent activity (resets the idle timer)
+          ping                   report computer use by an agent (keeps or starts the shield window)
           idle-timeout <min>     minutes without agent activity before locking; 0 = never
           style overlay|blackout choose the shield style
 
@@ -653,7 +653,7 @@ final class AgentModeController {
             self.perform(self.machine.humanInput(now: self.now))
         }
         inputGuard.onAgentInput = { [weak self] in
-            guard let self = self, self.machine.isActive else { return }
+            guard let self = self else { return }
             self.machine.agentActivity(now: self.now)
         }
         watchdog.onUnexpectedExit = { [weak self] in
@@ -845,11 +845,13 @@ final class AgentModeController {
     private func handleCommand(_ args: [String]) -> [String: Any] {
         guard let command = args.first else { return ["ok": false, "error": "empty_command"] }
         let presenceHere = host?.agentPresenceHere() ?? false
-        if machine.isActive { machine.agentActivity(now: now) }
+        // Only computer use counts as agent activity: `ping` here, `shield`
+        // inside shieldCommand. Polling `status` must not keep a shield up.
         switch command {
         case "status":
             return status()
         case "ping":
+            machine.agentActivity(now: now)
             return ["ok": true, "phase": machine.phase.rawValue]
         case "on", "off":
             setEnabled(command == "on")
@@ -897,8 +899,11 @@ final class AgentModeController {
     }
 
     private func status() -> [String: Any] {
+        let lastActivity = machine.lastAgentActivity
+        let hasActivity = lastActivity.isFinite
         let idleRemaining: Any = machine.phase == .shielded && machine.idleTimeout > 0
-            ? max(0, Int(machine.idleTimeout - (now - machine.lastAgentActivity))) : NSNull()
+            ? (hasActivity ? Int(max(0, machine.idleTimeout - (now - lastActivity))) : 0) : NSNull()
+        let activityAge: Any = hasActivity ? Int(max(0, now - lastActivity)) : NSNull()
         return [
             "ok": true,
             "agentMode": machine.enabled,
@@ -912,6 +917,8 @@ final class AgentModeController {
             "style": style.rawValue,
             "idleTimeoutMinutes": idleTimeoutMinutes,
             "idleRemainingSeconds": idleRemaining,
+            "lastAgentActivity": hasActivity ? Int(lastActivity) : NSNull(),
+            "agentActivityAgeSeconds": activityAge,
         ]
     }
 }

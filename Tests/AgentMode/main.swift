@@ -5,10 +5,12 @@ func check(_ condition: @autoclosure () -> Bool, _ message: String) {
     checks += 1
     guard condition() else { fatalError(message) }
 }
-func enabledMachine(idleTimeout: TimeInterval = 600) -> AgentModeMachine {
+/// Enabled machine whose agent last used the computer at `activityAt` (nil = never).
+func enabledMachine(idleTimeout: TimeInterval = 600, activityAt: TimeInterval? = 0) -> AgentModeMachine {
     var machine = AgentModeMachine()
     machine.idleTimeout = idleTimeout
     _ = machine.setEnabled(true, now: 0, presenceHere: true)
+    if let activityAt = activityAt { machine.agentActivity(now: activityAt) }
     return machine
 }
 
@@ -38,6 +40,31 @@ check(away.phase == .idle, "Return ends the session")
 check(away.awayConfirmed(now: 13) == [.showShield, .script("agent-shield")], "Leaving again re-shields without a lock")
 check(away.presenceReturned(now: 14).count == 2 && away.awayConfirmed(now: 15).first == .showShield,
       "Away/here/away flaps must never emit .lock")
+
+// Departure shields only within the idle timeout of the last computer use;
+// otherwise the Mac locks the ordinary way.
+var noAgent = enabledMachine(idleTimeout: 180, activityAt: nil)
+check(noAgent.awayConfirmed(now: 1_000) == [.legacyLock], "No computer use yet: departure must lock normally")
+check(noAgent.phase == .idle, "A normal lock starts no session")
+var stale = enabledMachine(idleTimeout: 180, activityAt: 1_000)
+check(stale.awayConfirmed(now: 1_180) == [.legacyLock], "Computer use older than the idle timeout must not shield")
+var recent = enabledMachine(idleTimeout: 180, activityAt: 1_000)
+check(recent.awayConfirmed(now: 1_179) == [.showShield, .script("agent-shield")], "Recent computer use must shield")
+check(recent.tick(now: 1_179).isEmpty, "Shield lasts until the idle timeout after the last activity")
+check(recent.tick(now: 1_180) == [.lock, .removeShield, .script("agent-idle")],
+      "Departure must not restart the idle timer")
+var idleRemembered = enabledMachine(idleTimeout: 180, activityAt: nil)
+idleRemembered.agentActivity(now: 2_000)
+check(idleRemembered.phase == .idle, "Activity alone starts no session")
+check(idleRemembered.awayConfirmed(now: 2_100).first == .showShield, "Activity recorded while idle must be remembered")
+var neverIdle = enabledMachine(idleTimeout: 0, activityAt: nil)
+check(neverIdle.awayConfirmed(now: 5_000) == [.showShield, .script("agent-shield")],
+      "Idle timeout 0 always shields, as before")
+var offActivity = AgentModeMachine()
+offActivity.idleTimeout = 180
+offActivity.agentActivity(now: 10)
+_ = offActivity.setEnabled(true, now: 11, presenceHere: true)
+check(offActivity.awayConfirmed(now: 12) == [.legacyLock], "Activity while Agent Mode is off must not count")
 
 // Local human input while shielded locks first, then removes the shield.
 var touched = enabledMachine()

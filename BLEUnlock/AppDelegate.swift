@@ -2934,7 +2934,7 @@ extension AppDelegate: AgentModeHost {
         let header = agentMenu.addItem(withTitle: NSLocalizedString("agent_idle_exit", value: "Lock When Agent Is Idle", comment: "Agent Mode idle timeout header"),
                                        action: nil, keyEquivalent: "")
         header.isEnabled = false
-        for minutes in [5, 10, 30] {
+        for minutes in [3, 5, 10, 30] {
             agentMenu.addItem(withTitle: "\(minutes) " + t("minutes"), action: #selector(setAgentIdleTimeout), keyEquivalent: "").tag = minutes
         }
         agentMenu.addItem(withTitle: NSLocalizedString("agent_idle_never", value: "Never", comment: "Agent Mode idle timeout disabled"),

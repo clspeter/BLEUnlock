@@ -213,12 +213,12 @@ Limitations: while an app holds Secure Event Input (password fields, some termin
 
 |Command|Effect|
 |-------|------|
-|`status`|Print the state as JSON: `agentMode`, `phase` (`idle`/`unlocking`/`shielded`), `shielded`, `presence`, `locked`, `guardHealthy`, `secureInput`, `watchdog`, `style`, `idleTimeoutMinutes`, `idleRemainingSeconds`.|
+|`status`|Print the state as JSON: `agentMode`, `phase` (`idle`/`unlocking`/`shielded`), `shielded`, `presence`, `locked`, `guardHealthy`, `secureInput`, `watchdog`, `style`, `idleTimeoutMinutes`, `idleRemainingSeconds`, `lastAgentActivity` (Unix time, `null` if none yet), `agentActivityAgeSeconds`.|
 |`on` / `off`|Enable or disable Agent Mode. Turning it off during a session locks unless your device is nearby.|
 |`shield`|Start a session now. If the screen is locked, the shield goes up first and BLEUnlock then unlocks with the stored password. The command returns once the unlock has started; poll `status` until `phase` is `shielded` and `locked` is `false`. If the unlock does not complete within 15 seconds, the screen stays locked and `phase` returns to `idle`.|
 |`release`|End the session; locks unless your device is nearby.|
-|`ping`|Report agent activity (resets the idle timer). Every command counts as activity.|
-|`idle-timeout <minutes>`|Minutes without agent activity before the session ends with a lock; `0` = never.|
+|`ping`|Report computer use by an agent: resets the idle timer, and lets the next departure shield instead of lock. Computer-use tools should send it whenever they act. No other command except `shield` counts as activity.|
+|`idle-timeout <minutes>`|Minutes after the last agent activity during which a departure shields, and after which a session ends with a lock; `0` = never (always shield).|
 |`style overlay` / `style blackout`|Choose the shield style.|
 
 Commands go through a Unix socket in your per-user temporary directory that only your user can connect to. The interface never accepts or prints the password. The exit status is 0 on success, 1 on a refused command and 2 when BLEUnlock is not running.
